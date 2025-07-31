@@ -10,6 +10,5 @@ coverage/
 *.log
 *.tmp
 *.json
-*.csv
-*.txt
+
  
