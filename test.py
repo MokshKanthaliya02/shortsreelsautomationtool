@@ -1,124 +1,116 @@
+# summarizer.py
+
 import os
-import json
+import csv
 import time
-import re
+import json
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-# === Load API Key ===
+# --- Load API Key from .env ---
 load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY2")
+API_KEY = os.getenv("GEMINI_API_KEY1")
 if not API_KEY:
-    raise ValueError("❌ GEMINI_API_KEY2 not found in .env file.")
+    raise ValueError("❌ GEMINI_API_KEY not found in .env file.")
+
+# --- Configure Gemini API ---
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-# === Config ===
+# --- File Paths ---
 BASE_DIR = r"D:\ShortsReelsAutomationTool"
-SUMMARY_DIR = os.path.join(BASE_DIR, "Summaries")
-SCRIPT_DIR = os.path.join(BASE_DIR, "Scripts")
-PROMPT_PATH = os.path.join(BASE_DIR, "video_script_gen_prompt.json")
-PROGRESS_PATH = os.path.join(SCRIPT_DIR, "progress.json")
-MAX_FILES_PER_RUN = 10
-WAIT_SECONDS = 5
+CSV_FOLDER = os.path.join(BASE_DIR, "Google Trends")
+OUTPUT_FOLDER = os.path.join(BASE_DIR, "Summaries")
+PROMPT_TEMPLATE_PATH = os.path.join(BASE_DIR, "sum_gen_prompt.json")
+FAILED_ROWS_PATH = os.path.join(OUTPUT_FOLDER, "failed_rows.json")
+PROGRESS_PATH = os.path.join(OUTPUT_FOLDER, "progress.json")
 
-os.makedirs(SCRIPT_DIR, exist_ok=True)
+# --- Ensure Output Directory Exists ---
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# === Load Prompt Template ===
-with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-    prompt_data = json.load(f)
+# --- Load Prompt Template from JSON ---
+with open(PROMPT_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+    prompt_json = json.load(f)
+    base_prompt = prompt_json.get("prompt", "")
+    if not base_prompt:
+        raise ValueError("❌ 'prompt' key not found or is empty in sum_gen_prompt.json.")
 
-# === Load Progress Tracking ===
+# --- Load Progress ---
+progress = {}
 if os.path.exists(PROGRESS_PATH):
     with open(PROGRESS_PATH, "r", encoding="utf-8") as f:
         progress = json.load(f)
-else:
-    progress = {}
 
-def build_prompt(summary_text):
-    return (
-        f"{prompt_data['instruction']}\n\n"
-        f"Goal: {prompt_data['goal']}\n"
-        f"Tone: {prompt_data['tone']}\n"
-        f"Audience: {prompt_data['audience']}\n"
-        f"Delivery: {prompt_data['style']['delivery']}\n"
-        f"Structure: {', '.join(prompt_data['style']['structure'])}\n"
-        f"Visuals: {', '.join(prompt_data['visuals']['instructions'])}\n\n"
-        f"{prompt_data['task']}\n\n"
-        f"=== BEGIN TOPIC SUMMARIES ===\n\n"
-        f"{summary_text.strip()}\n\n"
-        f"=== END ==="
-    )
-
-def clean_response(raw_output):
-    # Remove triple backticks
-    if raw_output.startswith("```"):
-        raw_output = re.sub(r"^```(json)?\n?", "", raw_output.strip())
-        raw_output = re.sub(r"\n?```$", "", raw_output.strip())
-
-    # Replace smart quotes
-    raw_output = raw_output.replace("“", '"').replace("”", '"')
-
-    # Escape quotes inside narration field
-    def escape_quotes_in_narration(match):
-        content = match.group(1).replace('"', '\\"')
-        return f'"narration": "{content}"'
-
-    raw_output = re.sub(r'"narration"\s*:\s*"(.+?)"', escape_quotes_in_narration, raw_output)
-    return raw_output
-
-def save_progress():
-    with open(PROGRESS_PATH, "w", encoding="utf-8") as f:
-        json.dump(progress, f, indent=2)
-
-# === Batch Process Files ===
-processed = 0
-for filename in os.listdir(SUMMARY_DIR):
-    if not filename.endswith(".txt"):
+# --- Process CSV Files ---
+for filename in os.listdir(CSV_FOLDER):
+    if not filename.endswith(".csv"):
         continue
 
-    summary_path = os.path.join(SUMMARY_DIR, filename)
-    base_name = os.path.splitext(filename)[0]
-    output_path = os.path.join(SCRIPT_DIR, f"{base_name}_scripts.json")
-
-    # Skip already done
-    if progress.get(filename, "") == "done":
+    if progress.get(filename) == "done":
+        print(f"⏭️  Skipping {filename}, already processed.")
         continue
 
-    print(f"\n📄 Processing: {filename}")
+    print(f"\n📄 Processing file: {filename}")
+    csv_path = os.path.join(CSV_FOLDER, filename)
+    output_path = os.path.join(OUTPUT_FOLDER, os.path.splitext(filename)[0] + "_summary.txt")
+
     try:
-        with open(summary_path, "r", encoding="utf-8") as f:
-            summary_content = f.read()
+        with open(csv_path, "r", encoding="utf-8") as csvfile:
+            reader = list(csv.DictReader(csvfile))
 
-        prompt = build_prompt(summary_content)
-        response = model.generate_content(prompt)
-        raw_output = response.text.strip()
+            if not reader:
+                print(f"⚠️ No rows found in {filename}. Skipping.")
+                continue
 
-        # Clean response
-        cleaned = clean_response(raw_output)
+            bulk_trend_entries = []
+            for i, row in enumerate(reader, start=1):
+                keyword = (row.get("Trends") or "").strip()
+                breakdown = (row.get("Trend breakdown") or "").strip()
+                timestamp = (row.get("Started") or "").strip()
+                link = (row.get("Explore link") or "").strip()
 
-        # Parse JSON
-        parsed = json.loads(cleaned)
+                if not keyword:
+                    continue
 
-        # Save JSON
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(parsed, f, indent=2, ensure_ascii=False)
+                bulk_trend_entries.append(
+                    f"{i}. Keyword: {keyword}\n"
+                    f"   Breakdown: {breakdown}\n"
+                    f"   Timestamp: {timestamp}\n"
+                    f"   Link: {link}\n"
+                )
 
-        print(f"✅ Saved to {output_path}")
-        progress[filename] = "done"
+            final_prompt = base_prompt.replace("{{bulk_trend_entries}}", "\n".join(bulk_trend_entries))
+
+            try:
+                response = model.generate_content(final_prompt)
+                summary = response.text.strip()
+
+                with open(output_path, "w", encoding="utf-8") as outfile:
+                    outfile.write(summary)
+
+                print(f"✅ Summary written to: {output_path}")
+
+                # Update progress
+                progress[filename] = "done"
+                with open(PROGRESS_PATH, "w", encoding="utf-8") as f:
+                    json.dump(progress, f, indent=2)
+
+            except Exception as e:
+                print(f"❌ Error summarizing {filename}: {e}")
+                failed_entry = {
+                    "file": filename,
+                    "prompt": final_prompt[:1000],
+                    "error": str(e)
+                }
+                if os.path.exists(FAILED_ROWS_PATH):
+                    with open(FAILED_ROWS_PATH, "r", encoding="utf-8") as f:
+                        existing_failed = json.load(f)
+                else:
+                    existing_failed = []
+
+                existing_failed.append(failed_entry)
+                with open(FAILED_ROWS_PATH, "w", encoding="utf-8") as f:
+                    json.dump(existing_failed, f, indent=2)
 
     except Exception as e:
-        print(f"❌ Failed on {filename}: {e}")
-        progress[filename] = "failed"
-
-    save_progress()
-    processed += 1
-
-    if processed >= MAX_FILES_PER_RUN:
-        print(f"\n⚠️ Reached max limit of {MAX_FILES_PER_RUN} files this run.")
-        break
-
-    print(f"⏳ Waiting {WAIT_SECONDS} seconds to avoid rate limits...")
-    time.sleep(WAIT_SECONDS)
-
-print("\n✅ All possible files processed for this run.")
+        print(f"❌ Failed to process {filename}: {e}")

@@ -10,5 +10,10 @@ coverage/
 *.log
 *.tmp
 *.json
+*.txt
+*.pyc
+*.pyo
+*.pyd
+*.db
 
  
