@@ -10,6 +10,7 @@ A user is tracking trends from Google Trends CSV exports. Below is a list of tre
    - Mention the **date of the event** and **trusted sources** (if possible).
 
 ---
+
 Here are the topics:
 
 {{bulk_trend_entries}}

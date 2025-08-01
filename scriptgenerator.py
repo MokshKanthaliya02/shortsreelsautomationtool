@@ -90,7 +90,7 @@ for filename in os.listdir(CSV_FOLDER):
                 # Update progress
                 progress[filename] = "done"
                 with open(PROGRESS_PATH, "w", encoding="utf-8") as f:
-                    json.dump(progress, f, indent=2)
+                    json.dump(progress, f)
 
             except Exception as e:
                 print(f"❌ Error summarizing {filename}: {e}")
